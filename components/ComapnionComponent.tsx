@@ -1,6 +1,6 @@
 "use client";
 
-import { cn, getSubjectColor } from "@/lib/utils";
+import { cn, configureAssistant, getSubjectColor } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
 import Lottie, { LottieRefCurrentProps } from "lottie-react";
 import Image from "next/image";
@@ -28,8 +28,10 @@ const ComapnionComponent = ({
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [messages, setMessages] = useState<SavedMessage[]>([]);
 
   const lottieRef = useRef<LottieRefCurrentProps>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (lottieRef) {
@@ -43,10 +45,17 @@ const ComapnionComponent = ({
 
   useEffect(() => {
     const onCallStart = () => setCallStatus(CallStatus.ACTIVE);
-
     const onCallEnd = () => setCallStatus(CallStatus.FINISHED);
 
-    const onMessage = () => {};
+    const onMessage = (message: Message) => {
+      if (message.type === "transcript" && message.transcriptType === "final") {
+        const newMessage = {
+          role: message.role,
+          content: message.transcript,
+        };
+        setMessages((prev) => [...prev, newMessage]);
+      }
+    };
 
     const onSpeechStart = () => setIsSpeaking(true);
     const onSpeechEnd = () => setIsSpeaking(false);
@@ -70,6 +79,13 @@ const ComapnionComponent = ({
     };
   }, []);
 
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({
+      top: transcriptRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
+
   const toggleMicrophone = () => {
     const isMuted = vapi.isMuted();
     vapi.setMuted(!isMuted);
@@ -78,24 +94,23 @@ const ComapnionComponent = ({
 
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
-
     const assistantOverrides = {
-      variableValues: {
-        subject,
-        topic,
-        style,
-      },
+      variableValues: { subject, topic, style },
       clientMessages: ["transcript"],
       serverMessages: [],
     };
-    vapi.start();
+    //@ts-expect-error
+    vapi.start(configureAssistant(voice, style), assistantOverrides);
   };
 
-  const handleDisconnect = async () => {};
+  const handleDisconnect = async () => {
+    setCallStatus(CallStatus.FINISHED);
+    vapi.stop();
+  };
 
   return (
-    <section className="flex flex-col h-[70vh]">
-      <section className="flex gap-8 max-sm:flex-col">
+    <section className="flex flex-col h-[70vh] max-h-[70vh]">
+      <section className="flex gap-8 max-sm:flex-col flex-none">
         <div className="companion-section">
           <div
             className="companion-avatar"
@@ -147,7 +162,11 @@ const ComapnionComponent = ({
             />
             <p className="font-bold text-2xl">{userName}</p>
           </div>
-          <button className="btn-mic" onClick={toggleMicrophone}>
+          <button
+            className="btn-mic"
+            onClick={toggleMicrophone}
+            disabled={callStatus !== CallStatus.ACTIVE}
+          >
             <Image
               src={isMuted ? "/icons/mic-off.svg" : "/icons/mic-on.svg"}
               alt="mic"
@@ -176,9 +195,29 @@ const ComapnionComponent = ({
           </button>
         </div>
       </section>
-      <section className="transcript">
-        <div className="transcript-message no-scrollbar">Messages</div>
-        <div className="transcript-fade" />
+
+      <section className="flex-1 flex flex-col relative overflow-hidden mt-4">
+        <div
+          ref={transcriptRef}
+          className="transcript-message flex-1 overflow-y-auto px-2 no-scrollbar"
+        >
+          {messages.map((message, index) => (
+            <p
+              key={index}
+              className={
+                message.role === "assistant"
+                  ? "max-sm:text-sm"
+                  : "text-primary max-sm:text-sm"
+              }
+            >
+              {message.role === "assistant"
+                ? name.replace(/[.,]/g, "")
+                : userName}
+              : {message.content}
+            </p>
+          ))}
+        </div>
+        <div className="transcript-fade absolute bottom-0 left-0 w-full h-12 pointer-events-none bg-gradient-to-t from-white to-transparent" />
       </section>
     </section>
   );
